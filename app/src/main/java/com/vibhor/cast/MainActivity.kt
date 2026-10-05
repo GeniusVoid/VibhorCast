@@ -24,11 +24,13 @@ import com.vibhor.cast.ui.theme.VibhorCastTheme
 class MainActivity : ComponentActivity() {
 
     private lateinit var prefs: SharedPreferences
+    private var hasPermissionState = mutableStateOf(false)
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted ->
         if (isGranted) {
+            hasPermissionState.value = true
             startMediaServer()
         }
     }
@@ -70,7 +72,9 @@ class MainActivity : ComponentActivity() {
                     HomeScreen(
                         tvIp = tvIp,
                         tvPort = tvPort,
-                        onOpenSettings = { showSettings = true }
+                        hasPermission = hasPermissionState.value,
+                        onOpenSettings = { showSettings = true },
+                        onRequestPermission = { checkPermissionsAndStartServer() }
                     )
                 }
             }
@@ -85,6 +89,7 @@ class MainActivity : ComponentActivity() {
         }
 
         if (ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED) {
+            hasPermissionState.value = true
             startMediaServer()
         } else {
             permissionLauncher.launch(permission)

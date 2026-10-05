@@ -6,11 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -32,12 +28,14 @@ import kotlinx.coroutines.launch
 fun HomeScreen(
     tvIp: String,
     tvPort: String,
-    onOpenSettings: () -> Unit
+    hasPermission: Boolean,
+    onOpenSettings: () -> Unit,
+    onRequestPermission: () -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var videos by remember { mutableStateOf<List<VideoFile>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(true) }
+    var isLoading by remember { mutableStateOf(false) }
     var isConnected by remember { mutableStateOf(false) }
     var selectedVideo by remember { mutableStateOf<VideoFile?>(null) }
     var isPlaying by remember { mutableStateOf(false) }
@@ -45,9 +43,20 @@ fun HomeScreen(
     val client = remember(tvIp, tvPort) { ExoAirPlayerClient("$tvIp:$tvPort") }
     val localIp = remember { TVDiscovery.getLocalIpAddress() ?: "127.0.0.1" }
 
-    LaunchedEffect(Unit) {
-        videos = MediaScanner.scanVideos(context.contentResolver)
-        isLoading = false
+    val loadVideos = {
+        if (hasPermission) {
+            isLoading = true
+            scope.launch {
+                videos = MediaScanner.scanVideos(context.contentResolver)
+                isLoading = false
+            }
+        }
+    }
+
+    LaunchedEffect(hasPermission) {
+        if (hasPermission) {
+            loadVideos()
+        }
     }
 
     LaunchedEffect(tvIp, tvPort) {
@@ -72,6 +81,9 @@ fun HomeScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = loadVideos) {
+                        Icon(Icons.Default.Refresh, contentDescription = "Refresh Videos")
+                    }
                     IconButton(onClick = onOpenSettings) {
                         Icon(Icons.Default.Settings, contentDescription = "Settings")
                     }
@@ -111,47 +123,64 @@ fun HomeScreen(
             }
         }
     ) { padding ->
-        if (isLoading) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-                    .padding(horizontal = 16.dp)
-            ) {
-                items(videos) { video ->
-                    VideoItem(
-                        video = video,
-                        isSelected = selectedVideo == video,
-                        onClick = { selectedVideo = if (selectedVideo == video) null else video },
-                        onPlay = {
-                            scope.launch {
-                                val url = "http://$localIp:8080${video.path}"
-                                val result = client.play(url)
-                                result.onSuccess {
-                                    Toast.makeText(context, "Playing on TV", Toast.LENGTH_SHORT).show()
-                                    isPlaying = true
-                                }.onFailure {
-                                    Toast.makeText(context, "Failed to play", Toast.LENGTH_SHORT).show()
+        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+            if (!hasPermission) {
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text("Storage permission is required to find videos")
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Button(onClick = onRequestPermission) {
+                        Text("Grant Permission")
+                    }
+                }
+            } else if (isLoading) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+            } else if (videos.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("No videos found on this device", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 16.dp)
+                ) {
+                    items(videos) { video ->
+                        VideoItem(
+                            video = video,
+                            isSelected = selectedVideo == video,
+                            onClick = { selectedVideo = if (selectedVideo == video) null else video },
+                            onPlay = {
+                                scope.launch {
+                                    val url = "http://$localIp:8080${video.path}"
+                                    val result = client.play(url)
+                                    result.onSuccess {
+                                        Toast.makeText(context, "Playing on TV", Toast.LENGTH_SHORT).show()
+                                        isPlaying = true
+                                    }.onFailure {
+                                        Toast.makeText(context, "Failed to play", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            },
+                            onQueue = {
+                                scope.launch {
+                                    val url = "http://$localIp:8080${video.path}"
+                                    val result = client.queue(url)
+                                    result.onSuccess {
+                                        Toast.makeText(context, "Added to queue", Toast.LENGTH_SHORT).show()
+                                    }.onFailure {
+                                        Toast.makeText(context, "Failed to queue", Toast.LENGTH_SHORT).show()
+                                    }
                                 }
                             }
-                        },
-                        onQueue = {
-                            scope.launch {
-                                val url = "http://$localIp:8080${video.path}"
-                                val result = client.queue(url)
-                                result.onSuccess {
-                                    Toast.makeText(context, "Added to queue", Toast.LENGTH_SHORT).show()
-                                }.onFailure {
-                                    Toast.makeText(context, "Failed to queue", Toast.LENGTH_SHORT).show()
-                                }
-                            }
-                        }
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
                 }
             }
         }
